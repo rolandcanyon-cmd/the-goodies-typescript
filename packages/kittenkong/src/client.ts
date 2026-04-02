@@ -1,6 +1,23 @@
 /**
- * KittenKong Client
- * TypeScript port of Python blowing-off client
+ * KittenKong Client - TypeScript Client for The Goodies
+ *
+ * PURPOSE:
+ * TypeScript port of the Python blowing-off client for The Goodies smart home system.
+ * Provides real-time synchronization with FunkyGibbon server, local MCP tool execution,
+ * and offline-capable graph operations.
+ *
+ * CORE FUNCTIONALITY:
+ * - Real-time sync with FunkyGibbon server
+ * - Local SQLite database for offline operation
+ * - MCP tool execution
+ * - Entity-relationship graph operations
+ * - Conflict resolution with multiple strategies
+ *
+ * VERSION HISTORY:
+ * - 2025-04-02: Initial TypeScript port from Python blowing-off client
+ *
+ * PORTED FROM:
+ * Python: blowing-off/blowingoff/client.py
  */
 
 import type { Entity, EntityType, SyncResult } from '@the-goodies/inbetweenies';

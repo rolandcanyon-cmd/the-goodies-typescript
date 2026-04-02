@@ -1,6 +1,25 @@
 /**
- * Entity and Relationship Types for The Goodies
- * TypeScript port of Python inbetweenies/models.py
+ * Inbetweenies Protocol Types
+ *
+ * PURPOSE:
+ * TypeScript type definitions for The Goodies protocol. Defines entities, relationships,
+ * blobs, sync metadata, and all enums used in the knowledge graph system.
+ *
+ * CORE TYPES:
+ * - Entity: Nodes in the knowledge graph (devices, rooms, automations, etc.)
+ * - EntityRelationship: Edges connecting entities
+ * - Blob: Binary data attachments (photos, PDFs, manuals)
+ * - SyncMetadata: Synchronization state tracking
+ * - SyncResult: Result of sync operations
+ *
+ * VERSION HISTORY:
+ * - 2025-04-02: Initial TypeScript port from Python inbetweenies/models.py
+ *   - Complete enum definitions (EntityType, SourceType, RelationshipType, BlobType, BlobStatus)
+ *   - All interface definitions matching Python dataclasses
+ *   - Added comprehensive context header
+ *
+ * PORTED FROM:
+ * Python: inbetweenies/models.py
  */
 
 /** Entity types in the knowledge graph */
