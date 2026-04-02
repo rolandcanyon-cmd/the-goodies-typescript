@@ -35,9 +35,9 @@ export interface KittenKongOptions {
  * Based on Python BlowingOffClient from blowing-off/client.py
  */
 export class KittenKongClient {
-  private serverUrl: string;
+  public readonly serverUrl: string;
+  public readonly clientId: string;
   private authToken?: string;
-  private clientId: string;
 
   constructor(options: KittenKongOptions) {
     this.serverUrl = options.serverUrl;
