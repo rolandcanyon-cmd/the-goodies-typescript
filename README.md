@@ -97,7 +97,8 @@ Server will be available at `http://localhost:8000`
 - [the-goodies](https://github.com/adrianco/the-goodies) - Python implementation (FunkyGibbon server, Blowing-Off client, Inbetweenies protocol)
 - [the-goodies-swift](https://github.com/adrianco/the-goodies-swift) - Swift client implementation
 - [c11s-house-ios](https://github.com/adrianco/c11s-house-ios) - iOS app using The Goodies
+- [instar](https://github.com/JKHeadley/instar) - Autonomous agent infrastructure framework
 
 ## License
 
-MIT
+Apache 2.0
