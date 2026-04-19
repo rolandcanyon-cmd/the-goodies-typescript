@@ -129,7 +129,7 @@ export class AuthManager {
    */
   async loginAdmin(password: string): Promise<boolean> {
     try {
-      const response = await fetch(`${this.serverUrl}/auth/login`, {
+      const response = await fetch(`${this.serverUrl}/api/v1/auth/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
@@ -139,7 +139,7 @@ export class AuthManager {
         return false;
       }
 
-      const data: LoginResponse = await response.json();
+      const data = await response.json() as LoginResponse;
 
       this.token = data.access_token;
       this.role = data.role;
@@ -170,7 +170,7 @@ export class AuthManager {
       this.serverUrl = `http://${data.server}:${data.port}`;
 
       // Exchange QR token for access token
-      const response = await fetch(`${this.serverUrl}/auth/guest`, {
+      const response = await fetch(`${this.serverUrl}/api/v1/auth/guest/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ qr_token: data.token })
@@ -180,7 +180,7 @@ export class AuthManager {
         return false;
       }
 
-      const loginData: LoginResponse = await response.json();
+      const loginData = await response.json() as LoginResponse;
 
       this.token = loginData.access_token;
       this.role = loginData.role;
@@ -249,7 +249,7 @@ export class AuthManager {
     }
 
     try {
-      const response = await fetch(`${this.serverUrl}/auth/refresh`, {
+      const response = await fetch(`${this.serverUrl}/api/v1/auth/refresh`, {
         method: 'POST',
         headers: this.getHeaders()
       });
@@ -258,7 +258,7 @@ export class AuthManager {
         return false;
       }
 
-      const data: Pick<LoginResponse, 'access_token' | 'expires_in'> = await response.json();
+      const data = await response.json() as Pick<LoginResponse, 'access_token' | 'expires_in'>;
 
       this.token = data.access_token;
       this.tokenExpires = new Date(Date.now() + data.expires_in * 1000);
@@ -279,7 +279,7 @@ export class AuthManager {
     }
 
     try {
-      const response = await fetch(`${this.serverUrl}/auth/guest/qr`, {
+      const response = await fetch(`${this.serverUrl}/api/v1/auth/guest/generate-qr`, {
         method: 'POST',
         headers: {
           ...this.getHeaders(),
@@ -292,7 +292,7 @@ export class AuthManager {
         return null;
       }
 
-      return await response.json();
+      return await response.json() as QRResponse;
     } catch (error) {
       return null;
     }
