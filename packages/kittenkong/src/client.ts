@@ -1,94 +1,423 @@
 /**
  * KittenKong Client - TypeScript Client for The Goodies
  *
- * PURPOSE:
- * TypeScript port of the Python blowing-off client for The Goodies smart home system.
- * Provides real-time synchronization with FunkyGibbon server, local MCP tool execution,
- * and offline-capable graph operations.
+ * Full-featured client for the FunkyGibbon knowledge graph server.
+ * Provides real-time sync, local MCP tool execution, offline operation,
+ * and entity-relationship graph management.
  *
- * CORE FUNCTIONALITY:
- * - Real-time sync with FunkyGibbon server
- * - Local SQLite database for offline operation
- * - MCP tool execution
- * - Entity-relationship graph operations
- * - Conflict resolution with multiple strategies
- *
- * VERSION HISTORY:
- * - 2025-04-02: Initial TypeScript port from Python blowing-off client
- *
- * PORTED FROM:
- * Python: blowing-off/blowingoff/client.py
+ * PORTED FROM: Python blowing-off/blowingoff/client.py
  */
 
 import type { Entity, EntityType, SyncResult } from '@the-goodies/inbetweenies';
+import { AuthManager } from './auth';
+import { SyncEngine, type SyncObserver } from './sync/engine';
+import { LocalGraphStorage } from './graph/local-storage';
+import { LocalGraphOperations, type ToolResult } from './graph/local-operations';
 
 export interface KittenKongOptions {
   serverUrl: string;
   authToken?: string;
-  dbPath?: string;  // Optional local SQLite path
+  dbPath?: string;
   clientId?: string;
 }
 
 /**
- * Main client for interacting with FunkyGibbon server
+ * Main client for interacting with FunkyGibbon server.
  *
- * Based on Python BlowingOffClient from blowing-off/client.py
+ * Supports three authentication methods:
+ * - Direct auth token (passed in options)
+ * - Admin password (via loginAdmin)
+ * - Guest QR code (via auth manager)
+ *
+ * All 12 MCP tools work locally on cached data, enabling offline operation.
  */
 export class KittenKongClient {
   public readonly serverUrl: string;
   public readonly clientId: string;
-  private authToken?: string;
+  private authManager: AuthManager;
+  private syncEngine: SyncEngine | null = null;
+  private storage: LocalGraphStorage;
+  private graphOps: LocalGraphOperations;
+  private connected: boolean = false;
+  private _isOffline: boolean = false;
 
   constructor(options: KittenKongOptions) {
     this.serverUrl = options.serverUrl;
-    this.authToken = options.authToken;
     this.clientId = options.clientId || `kittenkong-${Date.now()}`;
+
+    this.authManager = new AuthManager({ serverUrl: options.serverUrl });
+    if (options.authToken) {
+      this.authManager.token = options.authToken;
+      this.authManager.role = 'admin';
+      this.authManager.permissions = ['read', 'write', 'delete', 'configure'];
+      this.authManager.tokenExpires = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+    }
+
+    this.storage = new LocalGraphStorage();
+    this.graphOps = new LocalGraphOperations(this.storage);
+  }
+
+  /**
+   * Connect to the FunkyGibbon server and initialize sync
+   */
+  async connect(password?: string, qrData?: string): Promise<void> {
+    // Authenticate if credentials provided
+    if (password) {
+      const success = await this.authManager.loginAdmin(password);
+      if (!success) throw new Error('Admin authentication failed');
+    } else if (qrData) {
+      const success = await this.authManager.loginGuest(qrData);
+      if (!success) throw new Error('Guest authentication failed');
+    } else {
+      // Try loading saved token
+      await this.authManager.loadToken();
+    }
+
+    // Initialize sync engine
+    this.syncEngine = new SyncEngine(
+      this.serverUrl,
+      this.authManager,
+      this.clientId
+    );
+    this.syncEngine.setGraphOperations(this.graphOps);
+
+    // Check server connectivity
+    const serverUp = await this.checkServerConnectivity();
+    this._isOffline = !serverUp;
+
+    this.connected = true;
+
+    // Initial sync if server is reachable
+    if (serverUp) {
+      await this.syncEngine.sync();
+    }
   }
 
   /**
    * Authenticate with admin password
    */
   async loginAdmin(password: string): Promise<boolean> {
-    // TODO: Implement authentication
-    throw new Error('Not yet implemented');
+    const success = await this.authManager.loginAdmin(password);
+    if (success && !this.connected) {
+      await this.connect();
+    }
+    return success;
   }
+
+  /**
+   * Check if the server is reachable
+   */
+  async checkServerConnectivity(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.serverUrl}/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      this._isOffline = !response.ok;
+      return response.ok;
+    } catch {
+      this._isOffline = true;
+      return false;
+    }
+  }
+
+  /**
+   * Whether the client is in offline/disconnected mode
+   */
+  get isOffline(): boolean {
+    return this._isOffline;
+  }
+
+  /**
+   * Number of changes waiting to sync
+   */
+  get pendingChangesCount(): number {
+    return this.syncEngine?.pendingChangesCount || 0;
+  }
+
+  // --- Sync Operations ---
+
+  /**
+   * Sync with server (pull + push)
+   */
+  async sync(): Promise<SyncResult> {
+    if (!this.syncEngine) {
+      this.ensureConnected();
+      // If ensureConnected didn't throw, create engine on the fly
+      this.syncEngine = new SyncEngine(this.serverUrl, this.authManager, this.clientId);
+      this.syncEngine.setGraphOperations(this.graphOps);
+    }
+
+    const serverUp = await this.checkServerConnectivity();
+    if (!serverUp) {
+      return {
+        syncedEntities: 0,
+        changesSent: 0,
+        changesReceived: 0,
+        conflictsResolved: 0,
+        conflicts: [],
+        duration: 0,
+      };
+    }
+
+    return this.syncEngine.sync();
+  }
+
+  /**
+   * Start automatic background sync
+   */
+  async startBackgroundSync(intervalSeconds: number = 30): Promise<void> {
+    if (!this.syncEngine) {
+      this.syncEngine = new SyncEngine(this.serverUrl, this.authManager, this.clientId);
+      this.syncEngine.setGraphOperations(this.graphOps);
+    }
+    this.syncEngine.startBackgroundSync(intervalSeconds * 1000);
+  }
+
+  /**
+   * Get sync status and statistics
+   */
+  async getSyncStatus(): Promise<Record<string, any>> {
+    return this.syncEngine?.getSyncStatus() || {
+      lastSync: null,
+      lastSuccess: null,
+      totalSyncs: 0,
+      syncFailures: 0,
+      totalConflicts: 0,
+      syncInProgress: false,
+      lastError: null,
+      pendingChanges: 0,
+    };
+  }
+
+  // --- Observer Pattern ---
+
+  addObserver(callback: SyncObserver): void {
+    this.syncEngine?.addObserver(callback);
+  }
+
+  removeObserver(callback: SyncObserver): void {
+    this.syncEngine?.removeObserver(callback);
+  }
+
+  // --- Entity Operations ---
 
   /**
    * Create a new entity
    */
   async createEntity(entity: Partial<Entity>): Promise<Entity> {
-    // TODO: Implement entity creation
-    throw new Error('Not yet implemented');
+    const stored = await this.graphOps.storeEntity(entity as Entity);
+    this.syncEngine?.markEntityForSync(stored.id);
+    return stored;
+  }
+
+  /**
+   * Get an entity by ID
+   */
+  async getEntity(entityId: string): Promise<Entity | null> {
+    return this.graphOps.getEntity(entityId);
+  }
+
+  /**
+   * Get all entities of a given type
+   */
+  async getEntitiesByType(entityType: EntityType): Promise<Entity[]> {
+    return this.graphOps.getEntitiesByType(entityType);
+  }
+
+  /**
+   * Update an existing entity
+   */
+  async updateEntity(entityId: string, changes: Record<string, any>, userId?: string): Promise<Entity | null> {
+    const updated = await this.graphOps.updateEntity(entityId, changes, userId);
+    if (updated) {
+      this.syncEngine?.markEntityForSync(updated.id);
+    }
+    return updated;
   }
 
   /**
    * Search entities by query
    */
   async searchEntities(query: string, entityTypes?: EntityType[], limit?: number): Promise<Entity[]> {
-    // TODO: Implement search
-    throw new Error('Not yet implemented');
+    const results = await this.graphOps.searchEntities(query, entityTypes, limit);
+    return results.map(r => r.entity);
   }
 
   /**
-   * Sync with server
+   * Get version history for an entity
    */
-  async sync(): Promise<SyncResult> {
-    // TODO: Implement sync
-    throw new Error('Not yet implemented');
+  async getEntityVersions(entityId: string): Promise<Entity[]> {
+    return this.graphOps.getEntityVersions(entityId);
+  }
+
+  // --- Relationship Operations ---
+
+  /**
+   * Create a relationship between entities
+   */
+  async createRelationship(
+    fromEntityId: string,
+    toEntityId: string,
+    relationshipType: string,
+    properties?: Record<string, any>,
+    userId?: string
+  ): Promise<any> {
+    return this.graphOps.storeRelationship({
+      id: '',
+      fromEntityId,
+      toEntityId,
+      relationshipType: relationshipType as any,
+      properties,
+      userId: userId || 'system',
+      createdAt: new Date(),
+    });
   }
 
   /**
-   * Execute MCP tool
+   * Get relationships with optional filters
    */
-  async executeMCPTool(toolName: string, args: Record<string, any>): Promise<any> {
-    // TODO: Implement MCP tool execution
-    throw new Error('Not yet implemented');
+  async getRelationships(fromId?: string, toId?: string, relType?: string): Promise<any[]> {
+    return this.graphOps.getRelationships(fromId, toId, relType as any);
   }
+
+  // --- MCP Tool Execution ---
+
+  /**
+   * Execute an MCP tool locally
+   */
+  async executeMCPTool(toolName: string, args: Record<string, any>): Promise<ToolResult> {
+    return this.graphOps.executeTool(toolName, args);
+  }
+
+  /**
+   * Get list of available MCP tools
+   */
+  getAvailableMCPTools(): string[] {
+    return this.graphOps.getAvailableTools();
+  }
+
+  // --- Graph Operations ---
+
+  /**
+   * Find path between two entities
+   */
+  async findPath(fromId: string, toId: string, maxDepth?: number): Promise<Entity[]> {
+    return this.graphOps.findPath(fromId, toId, maxDepth);
+  }
+
+  /**
+   * Find entities similar to a given entity
+   */
+  async findSimilarEntities(entityId: string, limit?: number): Promise<any[]> {
+    return this.graphOps.findSimilarEntities(entityId, limit);
+  }
+
+  /**
+   * Get graph statistics
+   */
+  getGraphStatistics(): Record<string, any> {
+    return this.storage.getStatistics();
+  }
+
+  // --- Permissions ---
+
+  /**
+   * Check if user has write permission
+   */
+  checkWritePermission(): boolean {
+    return this.authManager.hasPermission('write');
+  }
+
+  /**
+   * Check if user is admin
+   */
+  checkAdminPermission(): boolean {
+    return this.authManager.role === 'admin';
+  }
+
+  // --- Data Management ---
+
+  /**
+   * Clear all local graph data
+   */
+  clearGraphData(): void {
+    this.storage.clear();
+  }
+
+  /**
+   * Get the auth manager for direct access
+   */
+  getAuthManager(): AuthManager {
+    return this.authManager;
+  }
+
+  // --- Lifecycle ---
 
   /**
    * Disconnect and cleanup
    */
   async disconnect(): Promise<void> {
-    // TODO: Implement disconnect
+    this.syncEngine?.stopBackgroundSync();
+    this.syncEngine = null;
+    this.connected = false;
+  }
+
+  private ensureConnected(): void {
+    // Allow operations even when not explicitly connected
+    // (offline mode supports local-only operations)
+  }
+
+  // --- Demo ---
+
+  /**
+   * Demonstrate MCP functionality with sample data
+   */
+  async demoMCPFunctionality(): Promise<void> {
+    // Create a home
+    const home = await this.createEntity({
+      entityType: 'HOME' as any,
+      name: 'Demo Home',
+      content: { address: '123 Demo St' },
+    });
+
+    // Create rooms
+    const livingRoom = await this.createEntity({
+      entityType: 'ROOM' as any,
+      name: 'Living Room',
+      content: { floor: 1 },
+    });
+
+    const kitchen = await this.createEntity({
+      entityType: 'ROOM' as any,
+      name: 'Kitchen',
+      content: { floor: 1 },
+    });
+
+    // Create devices
+    const lightSwitch = await this.createEntity({
+      entityType: 'DEVICE' as any,
+      name: 'Smart Light',
+      content: { type: 'light', brand: 'Philips Hue' },
+    });
+
+    const thermostat = await this.createEntity({
+      entityType: 'DEVICE' as any,
+      name: 'Thermostat',
+      content: { type: 'thermostat', brand: 'Ecobee' },
+    });
+
+    // Create relationships
+    await this.createRelationship(livingRoom.id, home.id, 'PART_OF');
+    await this.createRelationship(kitchen.id, home.id, 'PART_OF');
+    await this.createRelationship(lightSwitch.id, livingRoom.id, 'LOCATED_IN');
+    await this.createRelationship(thermostat.id, kitchen.id, 'LOCATED_IN');
+    await this.createRelationship(livingRoom.id, kitchen.id, 'CONNECTS_TO');
+
+    // Test MCP tools
+    const devicesResult = await this.executeMCPTool('get_devices_in_room', { room_id: livingRoom.id });
+    console.log('Devices in Living Room:', devicesResult.result);
+
+    const searchResult = await this.executeMCPTool('search_entities', { query: 'Smart' });
+    console.log('Search for "Smart":', searchResult.result);
   }
 }

@@ -1,24 +1,42 @@
 /**
  * KittenKong - TypeScript Client for The Goodies
  *
- * PURPOSE:
- * Main entry point for the KittenKong TypeScript client library.
- * Provides access to FunkyGibbon server, authentication, and MCP tools.
+ * Full-featured client library for the FunkyGibbon knowledge graph server.
+ * Provides entity management, sync, MCP tools, and offline operation.
  *
- * EXPORTS:
- * - KittenKongClient: Main client for server communication
- * - AuthManager: Authentication and token management
- * - All Inbetweenies protocol types (Entity, EntityRelationship, etc.)
- *
- * VERSION HISTORY:
- * - 2025-04-02: Initial TypeScript port from Python blowing-off package
- *   - Added AuthManager export
- *   - Added comprehensive context header
- *
- * PORTED FROM:
- * Python: blowing-off package
+ * PORTED FROM: Python blowing-off package
  */
 
-export * from './client';
-export * from './auth';
+// Main client
+export { KittenKongClient, type KittenKongOptions } from './client';
+
+// Authentication
+export { AuthManager, type AuthManagerOptions } from './auth';
+
+// Sync
+export { SyncEngine, type SyncObserver } from './sync/engine';
+export { InbetweeniesProtocol } from './sync/protocol';
+export type {
+  SyncRequest,
+  SyncResponse,
+  SyncChange,
+  EntityChange,
+  RelationshipChange,
+  VectorClock,
+  SyncFilters,
+  ConflictInfo,
+  SyncStats,
+  Change,
+  Conflict as ProtocolConflict,
+} from './sync/protocol';
+export { ConflictResolver } from './sync/conflict-resolver';
+export type { ConflictData, ResolutionReason } from './sync/conflict-resolver';
+
+// Graph
+export { LocalGraphStorage } from './graph/local-storage';
+export type { SearchResult } from './graph/local-storage';
+export { LocalGraphOperations } from './graph/local-operations';
+export type { ToolResult, MCPToolName } from './graph/local-operations';
+
+// Re-export protocol types
 export type * from '@the-goodies/inbetweenies';
